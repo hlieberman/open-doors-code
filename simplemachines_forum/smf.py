@@ -1,5 +1,6 @@
 import logging
 import MySQLdb
+import time
 import re
 import sys
 
@@ -8,6 +9,8 @@ from shared_python.Sql import Sql
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 log = logging.getLogger()
+
+MIN_POST_LEN = 3 * 25 * 5 # 3 sentences, 25 words, 5 letters per word
 
 def clean_and_load_data(args):
 	# Initialize DB
@@ -47,6 +50,7 @@ def process_fics(args):
 
 	for fic in possible_fics:
 		log.debug(fic)
+		fic_id = fic[0]
 		title = fic[1]
 		author = fic[2]
 
@@ -63,10 +67,28 @@ def process_fics(args):
 			title = title[:pos]
 		title = title.strip()
 
-		print(u"Final title is: '{}'".format(title))
-		print(u"Genre is: '{}'".format(genre))
-		print(u"Rating is: '{}'".format(rating))
-		print(u"Status is: '{}'".format(status))
+		# Our title processing is complete.  Let's turn to the author.
+		author_id = sql.execute("SELECT id FROM authors WHERE id = %s", [author])
+		if not author_id:
+			[(name, email)] = sql.execute(
+				"""SELECT member_name, email_address FROM smf_members WHERE id_member = %s""", [author])
+			sql.execute("INSERT INTO authors (id, name, email) VALUES (%s, %s, %s)",
+			            [author, name, email])
+
+		# Begin fic processing
+		posts = sql.execute(
+			"""SELECT poster_time, body
+			 FROM smf_messages
+		         WHERE id_topic = %d AND id_member = %d
+			 ORDER BY poster_time DESC""", [fic_id, author])
+
+		# With the array (well, tuple of tuples) of posts,
+		# iterate over them and strip off any with a length
+		# less than MIN_POST_LEN
+		chapters = [p for p in posts if len(p[1]) >= MIN_POST_LEN]
+		first_post = time.gmtime(chapters[0][0])
+		last_post = time.gmtime(chapters[len(chapters)-1][0])
+
 
 def get_genre(title):
 	genres = {
