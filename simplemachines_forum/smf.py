@@ -1,9 +1,9 @@
 import logging
 import MySQLdb
-import time
 import re
 import sys
 
+from datetime import datetime
 from shared_python import Args, Common
 from shared_python.Sql import Sql
 
@@ -36,7 +36,7 @@ def process_fics(args):
 	possible_fics = sql.execute(
 		"""SELECT a.id_topic, b.subject, b.id_member from smf_topics a
 		 LEFT JOIN smf_messages b ON a.id_first_msg = b.id_msg
-		 WHERE a.id_board IN %s LIMIT 150""",
+		 WHERE a.id_board IN %s""",
 		[args.rp_forums])
 
 	# Unfortunately, many of these fics are not actually fics, but
@@ -53,6 +53,12 @@ def process_fics(args):
 		fic_id = fic[0]
 		title = fic[1]
 		author = fic[2]
+
+		# For idempotency, bail if the fic_id already exists
+		# in the database
+		if sql.execute("SELECT id FROM stories WHERE id = %s", [fic_id]):
+			log.debug("Already have this story.")
+			continue
 
 		# Nibble away at the title slowly
 		(genre, title) = get_genre(title)
@@ -79,16 +85,54 @@ def process_fics(args):
 		posts = sql.execute(
 			"""SELECT poster_time, body
 			 FROM smf_messages
-		         WHERE id_topic = %d AND id_member = %d
+		         WHERE id_topic = %s AND id_member = %s
 			 ORDER BY poster_time DESC""", [fic_id, author])
 
 		# With the array (well, tuple of tuples) of posts,
 		# iterate over them and strip off any with a length
 		# less than MIN_POST_LEN
 		chapters = [p for p in posts if len(p[1]) >= MIN_POST_LEN]
-		first_post = time.gmtime(chapters[0][0])
-		last_post = time.gmtime(chapters[len(chapters)-1][0])
 
+		# Sanity check that we still have something there
+		if len(chapters) == 0:
+			continue
+
+		# We need to execute a little dance, where we need to
+		# insert the story into the stories table before we
+		# can insert the chapters, but we don't want to
+		# iterate over the chapters FOR REALZ until after we
+		# have the story_id.  Break the loop by hand-picking
+		# the first and last post.
+		first_post = sane_time(chapters[0][0])
+		last_post = sane_time(chapters[len(chapters)-1][0])
+
+		# Insert the story
+		log.info(u"Inserting story %s", title)
+		sql.execute(
+			"""INSERT INTO stories (
+			   id,
+			   title,
+			   author_id,
+			   rating,
+			   date,
+			   updated,
+			   tags,
+			   fandoms,
+			   import_notes)
+			VALUES
+			   (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+		        [fic_id, title, author, rating, first_post, last_post, status, genre, u"Original Title: {}".format(fic[1])])
+
+		# Insert the chapters
+		j = 0
+		for i in chapters:
+			j = j + 1
+			sql.execute(
+				"""INSERT INTO chapters
+				   (position, text, date, story_id)
+				VALUES
+				   (%s, %s, %s, %s)""",
+				[j, i[1], sane_time(i[0]), fic_id])
 
 def get_genre(title):
 	genres = {
@@ -127,8 +171,10 @@ def get_rating(title):
 		"nc 17":"Explicit",
 		"x":"Explicit"
 	}
-
-	return tag_search(ratings, title)
+	(rating, new_title) = tag_search(ratings, title)
+	if not rating:
+		rating = "Unknown"
+	return (rating, new_title)
 
 def get_status(title):
 	statuses = {
@@ -148,6 +194,9 @@ def tag_search(pat_dict, title, tombstone = "\x1D"):
 		return (tag, new_title)
 	else:
 		return (None, title)
+
+def sane_time(timestamp):
+	return datetime.utcfromtimestamp(int(timestamp)).isoformat()
 
 # Temp Main
 args = Args.args_for_01()
