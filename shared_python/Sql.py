@@ -73,10 +73,10 @@ class Sql(object):
     result = self.cursor.fetchone()
     return not(result is None)
 
-  def create_skeleton(self, database):
+  def create_skeleton(self, database, prefix):
     self.cursor.execute("USE {}".format(database))
-    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `authors` (
-    `id` int(11) NOT NULL AUTO_INCREMENT,
+    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `{}_authors` (
+    `id` int(11) NOT NULL,
     `name` varchar(255) NOT NULL DEFAULT '',
     `email` varchar(255) NOT NULL DEFAULT '',
     `imported` tinyint(1) NOT NULL DEFAULT '0',
@@ -84,12 +84,12 @@ class Sql(object):
     `to_delete` tinyint(1) DEFAULT '0',
     PRIMARY KEY (`id`),
     UNIQUE KEY `id_UNIQUE` (`id`)
-    ) DEFAULT CHARSET=utf8""")
-    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `chapters` (
+    ) DEFAULT CHARSET=utf8""".format(prefix))
+    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `{}_chapters` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `position` int(11) DEFAULT NULL,
     `title` varchar(255) NOT NULL DEFAULT '',
-    `authorID` int(11) NOT NULL DEFAULT '0',
+    `author_id` int(11) NOT NULL DEFAULT '0',
     `text` mediumtext,
     `date` datetime DEFAULT NULL,
     `story_id` int(11) DEFAULT '0',
@@ -98,9 +98,9 @@ class Sql(object):
     PRIMARY KEY (`id`),
     UNIQUE KEY `id_UNIQUE` (`id`),
     KEY `storyid` (`story_id`)
-    ) DEFAULT CHARSET=utf8""")
-    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `stories` (
-    `id` int(11) NOT NULL AUTO_INCREMENT,
+    ) DEFAULT CHARSET=utf8""".format(prefix))
+    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `{}_stories` (
+    `id` int(11) NOT NULL,
     `title` varchar(255) NOT NULL DEFAULT '',
     `summary` text,
     `notes` text,
@@ -109,7 +109,7 @@ class Sql(object):
     `date` datetime DEFAULT NULL,
     `updated` datetime DEFAULT NULL,
     `categories` varchar(45) DEFAULT NULL,
-    `tags` varchar(255) NOT NULL DEFAULT '',
+    `tags` varchar(255) DEFAULT '',
     `warnings` varchar(255) DEFAULT '',
     `fandoms` varchar(255) DEFAULT NULL,
     `characters` varchar(255) DEFAULT NULL,
@@ -123,8 +123,8 @@ class Sql(object):
     PRIMARY KEY (`id`),
     UNIQUE KEY `id_UNIQUE` (`id`),
     KEY `authorId` (`author_id`)
-    ) DEFAULT CHARSET=utf8;""")
-    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `story_links` (
+    ) DEFAULT CHARSET=utf8;""".format(prefix))
+    self.cursor.execute("""CREATE TABLE IF NOT EXISTS `{}_story_links` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `title` varchar(255) CHARACTER SET latin1 NOT NULL DEFAULT '',
     `summary` text,
@@ -148,4 +148,4 @@ class Sql(object):
     PRIMARY KEY (`id`),
     UNIQUE KEY `id_UNIQUE` (`id`),
     KEY `authorId` (`author_id`)
-    ) DEFAULT CHARSET=utf8;""")
+    ) DEFAULT CHARSET=utf8;""".format(prefix))
