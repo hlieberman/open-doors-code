@@ -1,3 +1,4 @@
+import bbcode
 import logging
 import MySQLdb
 import re
@@ -7,7 +8,7 @@ from datetime import datetime
 from shared_python import Args, Common
 from shared_python.Sql import Sql
 
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 log = logging.getLogger()
 
 MIN_POST_LEN = 3 * 25 * 5 # 3 sentences, 25 words, 5 letters per word
@@ -25,14 +26,14 @@ def clean_and_load_data(args):
 
 	log.info("Loading database file {}".format(args.db_input_file))
 	sql.run_script_from_file(args.db_input_file, args.temp_db_database, '', True)
+	sql.create_skeleton(args.temp_db_database, args.db_table_prefix)
 	log.info("Database loaded.")
 
-	sql.create_skeleton(args.output_database)
-
 def process_fics(args):
-	# First, get a list of all possible fics
 	sql = Sql(args)
+	prefix = args.db_table_prefix
 
+	# First, get a list of all possible fics
 	possible_fics = sql.execute(
 		"""SELECT a.id_topic, b.subject, b.id_member from smf_topics a
 		 LEFT JOIN smf_messages b ON a.id_first_msg = b.id_msg
@@ -56,7 +57,7 @@ def process_fics(args):
 
 		# For idempotency, bail if the fic_id already exists
 		# in the database
-		if sql.execute("SELECT id FROM stories WHERE id = %s", [fic_id]):
+		if sql.execute("SELECT id FROM {}_stories WHERE id = %s".format(prefix), [fic_id]):
 			log.debug("Already have this story.")
 			continue
 
@@ -74,11 +75,11 @@ def process_fics(args):
 		title = title.strip()
 
 		# Our title processing is complete.  Let's turn to the author.
-		author_id = sql.execute("SELECT id FROM authors WHERE id = %s", [author])
+		author_id = sql.execute("SELECT id FROM {}_authors WHERE id = %s".format(prefix), [author])
 		if not author_id:
 			[(name, email)] = sql.execute(
 				"""SELECT member_name, email_address FROM smf_members WHERE id_member = %s""", [author])
-			sql.execute("INSERT INTO authors (id, name, email) VALUES (%s, %s, %s)",
+			sql.execute("INSERT INTO {}_authors (id, name, email) VALUES (%s, %s, %s)".format(prefix),
 			            [author, name, email])
 
 		# Begin fic processing
@@ -109,7 +110,7 @@ def process_fics(args):
 		# Insert the story
 		log.info(u"Inserting story %s", title)
 		sql.execute(
-			"""INSERT INTO stories (
+			"""INSERT INTO {}_stories (
 			   id,
 			   title,
 			   author_id,
@@ -120,7 +121,7 @@ def process_fics(args):
 			   fandoms,
 			   import_notes)
 			VALUES
-			   (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+			   (%s,%s,%s,%s,%s,%s,%s,%s,%s)""".format(prefix),
 		        [fic_id, title, author, rating, first_post, last_post, status, genre, u"Original Title: {}".format(fic[1])])
 
 		# Insert the chapters
@@ -128,11 +129,11 @@ def process_fics(args):
 		for i in chapters:
 			j = j + 1
 			sql.execute(
-				"""INSERT INTO chapters
+				"""INSERT INTO {}_chapters
 				   (position, text, date, story_id)
 				VALUES
-				   (%s, %s, %s, %s)""",
-				[j, i[1], sane_time(i[0]), fic_id])
+				   (%s, %s, %s, %s)""".format(prefix),
+				[j, bbcode.render_html(i[1]), sane_time(i[0]), fic_id])
 
 def get_genre(title):
 	genres = {
@@ -141,6 +142,7 @@ def get_genre(title):
 		"rid":"Riddick",
 		"tcor":"The Chronicles of Riddick",
 		"cor":"The Chronicles of Riddick",
+		"pitch black":"Pitch Black",
 		"pb":"Pitch Black",
 		"kag":"Knockaround Guys",
 		"xxx":"xXx",
@@ -153,10 +155,22 @@ def get_genre(title):
 		"original":"Original Work",
 		"orig":"Original Work",
 		"ori":"Original Work",
-		"hitman":"Hitman"
+		"hitman":"Hitman",
+		"twilight":"Twilight",
+		"hp":"Harry Potter",
+		"potc":"Pirates of the Caribbean",
 	}
 
-	return tag_search(genres, title, '')
+	# Because there can be multiple genres in the first tag, we
+	# need to fetch the tag manually and then split it on slashes.
+
+	mat = re.search("^[\(\[\{]([^\]\)\}]+)[\]\)\}]", title.lower())
+	if mat:
+		new_title = title[:mat.start()] + title[mat.end():]
+		genre = [genres[t] for t in re.split("/|,\s?", mat.group(1)) if genres.has_key(t)]
+		return (",".join(sorted(genre)), new_title)
+	else:
+		return (None, title)
 
 def get_rating(title):
 	ratings = {
@@ -178,9 +192,9 @@ def get_rating(title):
 
 def get_status(title):
 	statuses = {
-		"ong":False,
-		"wip":False,
-		"fin":True
+		"ong":"Incomplete",
+		"wip":"Incomplete",
+		"fin":"Complete"
 	}
 
 	return tag_search(statuses, title)
